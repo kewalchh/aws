@@ -1,0 +1,178 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Cloudformation template for Product Catalog. It consist of API Gateway, Lambda function, and DynamoDB.
+
+Parameters:
+  #S3 Bucket name for Lambda Function
+  S3BucketLambdaCode:
+    Description: S3Bucket for Get and Post Lambda Function
+    Type: String
+
+Resources:
+  #IAM Role for API Gateway
+  ProductCatalogApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Policies:
+        - PolicyName: InvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  #IAM Role for Lambda Function
+  ProductCatalogLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - 
+          arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - 
+          arn:aws:iam::aws:policy/AmazonAPIGatewayAdministrator
+        - 
+          arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  #API Gateway for Product Catalog REST Api
+  ProductCatalogApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ProductCatalogApi
+      Description: API used for ProductCatalogApi requests
+      FailOnWarnings: true
+      Body:
+        swagger: '2.0'
+        info:
+          version: '2020-06-28T09:59:49Z'
+          title: sampleapi
+        basePath: "/Dev"
+        schemes:
+        - https
+        paths:
+          "/product":
+            get:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - name: prodId
+                in: query
+                required: false
+                type: string
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    "$ref": "#/definitions/Empty"
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetLambdaFunction.Arn}/invocations"
+                credentials: !GetAtt ProductCatalogApiRole.Arn
+                responses:
+                  default:
+                    statusCode: '200'
+                requestTemplates:
+                  application/json: |-
+                    {
+                    "prodId":$input.params('productId')
+                    }
+                passthroughBehavior: when_no_templates
+                httpMethod: POST
+                contentHandling: CONVERT_TO_TEXT
+                type: aws
+            post:
+              produces:
+              - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    "$ref": "#/definitions/Empty"
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostLambdaFunction.Arn}/invocations"
+                credentials: !GetAtt ProductCatalogApiRole.Arn
+                responses:
+                  default:
+                    statusCode: '200'
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                contentHandling: CONVERT_TO_TEXT
+                type: aws
+        definitions:
+          Empty:
+            type: object
+            title: Empty Schema
+      Parameters:
+          endpointConfigurationTypes: REGIONAL
+
+  ProductCatalogApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ProductCatalogApi
+      StageName: Dev
+
+  #GET Function to get Product Catalog based on Id
+  GetLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "lambda_function.lambda_handler"
+      Role: !GetAtt "ProductCatalogLambdaRole.Arn"
+      Code:
+        S3Bucket: !Ref S3BucketLambdaCode
+        S3Key: GetProductCatalogApiFunction.zip
+      Description: "Get the Product Catalog details"
+      FunctionName: "GetProductCatalogApiFunction"
+      MemorySize: 128
+      Runtime: "python3.7"
+      Timeout: 10
+
+  #POST Function on Product Catalog DB
+  PostLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref S3BucketLambdaCode
+        S3Key: PostProductCatalogApiFunction.zip
+      Description: "Post the Product Catalog details"
+      FunctionName: "PostProductCatalogApiFunction"
+      Handler: "lambda_function.lambda_handler"
+      Role: !GetAtt "ProductCatalogLambdaRole.Arn"
+      MemorySize: 128
+      Runtime: "python3.7"
+      Timeout: 10
+
+  #DynamoDB for Product Catalog
+  tableProductCatalog:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ProductCatalog
+      AttributeDefinitions:
+      - AttributeName: "Id"
+        AttributeType: "N"
+      KeySchema:
+      - AttributeName: "Id"
+        KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5

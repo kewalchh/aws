@@ -1,2 +1,4 @@
 # aws
-Placeholder for AWS projects
+Projects:
+
+1. CloudFormation/ServerlessApp
